@@ -1,0 +1,171 @@
+---
+title: "Bellabeat Study Case"
+author: "Isabela Siqueira"
+date: "15/08/2021"
+output: html_document
+---
+
+### About this project
+
+The Bellabeat case study is a data analysis project under the roadmap for obtaining the  \textbf{Google Data Analytics Professional Certificate}. We will follow the steps of the data analysis process: ask, prepare, process, analyze, share, and act. With this we aim to answer our fictional employer Bellabeat some questions:
+
+1. What are some trends in smart device usage?
+2. How could these trends apply to Bellabeat customers?
+3. How could these trends help influence Bellabeat marketing strategy?
+
+
+#### The Bellabeat
+
+[Bellabeat](https://bellabeat.com/about/) is a a high-tech company that manufactures health-focused smart products. their products are main focused in tracking activity, sleep , water intake, stress and menstrual cycles of their clients.
+Since the main target of marketing strategies are based in social media (Facebook, Instagram, Youtube and Twitter) it's key to understand how useful the data collected by smart devices are to their public.
+
+#### The Data
+
+The data is a public data set that explores around 30 users daily habits and is decribed by the publisher in Kaggle:
+
+[FitBit Fitness Tracker Data](https://www.kaggle.com/arashnic/fitbit) (CC0: Public Domain, dataset made available through [Mobius](https://www.kaggle.com/arashnic)): This Kaggle data set contains personal fitness tracker from thirty fitbit users. Thirty eligible Fitbit users consented to the submission of personal tracker data, including minute-level output for physical activity, heart rate, and sleep monitoring. It includes information about daily activity, steps, and heart rate that can be used to explore users’ habits.
+
+**Possible Problems**
+
+The data as it's presented, doesn't have information about age or sex, so it can be biased. The weight information can be added manually so it could contain human error.
+
+### Starting the EDA
+
+For these analysis we will use R. We will start by taking a look at the datasets that integrates the daily activities, sleep, weight and heart rate. 
+
+```{r}
+# Loading the packages we will use
+library(tidyverse, warn.conflicts = FALSE)
+library(janitor)
+library(here)
+library(glue)
+library(lubridate)
+library(chron)
+```
+
+### Data Fisrt Look
+
+Let's check how many files we have at our disposal.
+
+```{r}
+# Let's check how many files we have
+
+list.files('./Fitabase')
+
+```
+
+The files are divided by time units, except for weight that may be a manual log entry. The file named dailyActivity contains all the daily data in one single file.  
+
+To begin our analysis, let's take a look at the daily information, sleep and weight files: 
+
+```{r}
+dailyActivity <- read_csv('./Fitabase/dailyActivity_merged.csv')
+
+sleepDay <- read_csv('./Fitabase/sleepDay_merged.csv')
+
+weightInfo <- read_csv('./Fitabase/weightLogInfo_merged.csv')
+```
+
+To find out how many unique participants we have in each dataset, we will count the number of distinct Ids present in the data.
+
+```{r}
+n_distinct(sleepDay$Id)
+n_distinct(weightInfo$Id)
+n_distinct(dailyActivity$Id)
+n_distinct(heartRate$Id)
+str(dailyActivity)
+```
+There is a difference in the number of unique Ids between the datasets. Since the weight dataset has fewer unique Ids we will start by merging the daily activity and the sleep datasets, this will give us an idea of the daily routine of 24 different people. We will also convert the dates from chars to date format so we can merge the dataset based on the dates.
+
+```{r}
+sleepDay$SleepDay <- mdy_hms(sleepDay$SleepDay)
+sleepDay$SleepDay <- as.Date(sleepDay$SleepDay)
+dailyActivity$ActivityDate <- mdy(dailyActivity$ActivityDate)
+fitDaily <- left_join(sleepDay, dailyActivity, by=c('Id'='Id','SleepDay'='ActivityDate'))
+```
+
+Now that we have joined our data, let's take a look at it.
+
+```{r}
+tibble(fitDaily)
+str(fitDaily)
+```
+Since we have one entry for user Id, we can make our analysis based in each user and have a better understanding of what types of people use the FitBit with some recurrence. 
+
+To make the analysis more significant, we will filter out the Ids with at least 10 occurrences, this will help to focus more on the people that use the FitBit more often.
+
+```{r}
+fitDaily <- drop_na(fitDaily)
+Filter_data <- fitDaily %>% group_by(Id) %>% summarise(count = n_distinct(SleepDay)) %>% filter(count>10)
+fitDaily_clean <- merge(Filter_data, fitDaily, 'Id')
+fitDaily_clean %>% select(TotalMinutesAsleep, TotalTimeInBed, TotalSteps, 
+                                            TotalDistance, VeryActiveDistance, SedentaryMinutes,
+                                            VeryActiveMinutes, Calories) %>% summary()
+```
+If we look at the Calories summary, we can see that the max amount of calories burned is 4900 calories, which is a lot. This could be due to a sum of values by each day, to confirm that, lets take the Id that burned the most calories in one day (4900 cal) to try to understand why this value is so high.
+
+```{r}
+one_user <- fitDaily %>% group_by(Id) %>% filter(Id==6117666160)
+tibble(one_user)
+```
+
+As we can see, this amount of calories are counted by day and not a total sum of the values by day. It still too high, specially that in this particular day the person computed a loss of 4900 calories, but they did only 11 minutes of intense activity. Let's use a visual exploration to see if this pattern repeats.
+
+### Checking for trends
+ 
+Once that we filtered our data and have a better idea of how it's presented we can use some plots to better understanding of how we can apply this study to Bellabeat.
+
+
+```{r}
+fitDaily_clean$WeekDay <- weekdays(fitDaily_clean$SleepDay)
+fitDaily_clean <- mutate(fitDaily_clean, TotalActivityHours = (VeryActiveMinutes+FairlyActiveMinutes+LightlyActiveMinutes)/60)
+fitDaily_clean %>% ggplot(aes(TotalActivityHours, Calories)) + geom_point() + facet_wrap(~Id) + theme(axis.text.x = element_text(angle=45)) + labs(title = 'Calories Expent in All types of Activities', x = 'Activity/Hours') 
+```
+
+This visual approach shows us that 5 users shows a high number of calories burned by hour of activity and, even with th5553957443e raise of hours dedicated to some kind of activity, the increase of calories is not dramatic, if we look at the plots for users **1503960366, 3977333714, 4319703577 and 5553957443** we can see a linear distribution of the points, this could show us that for some people, the FitBit tends to overestimate the amount of calories burned.
+
+The FitBit calculates the amount of burned calories using the Basal Metabolic Rate (BMR) - which is the amount of calories that the person needs to maintain vital body functions (including breathing, blood circulation, and heartbeat) - and the activity data that depends on the heart rate data. It also tracks the amount of calories that the user burns during sleep, we should also consider that [men have a higher BMR than women](https://onlinelibrary.wiley.com/doi/full/10.1038/oby.2009.162#:~:text=Generally%2C%20BMR%20depends%20on%20body,physical%20activity%2C%20and%20nutritional%20status.&text=Gender%20is%20also%20a%20significant,composition%20(9%2C10), so men could burn more calories than women during lighter types of activity. other factors like age and body fat percentage could also help to overestimate this values.
+
+With this graph we can see that the calorie tracker of the smart devices could use a improvement. And as a total time of activity the user shouldn't be so fixed on the calorie loss.
+To see the trends of the overwaal usage of each user, we will use some time framed plots to checks if that is a pattern for the users and if that is universal.
+
+```{r}
+fitDaily_clean %>%ggplot(aes(factor(WeekDay, weekdays(min(SleepDay)+0:6)), TotalSteps)) + geom_col()  + facet_wrap(~Id) + theme(axis.text.x = element_text(angle=90)) + labs(title = 'Total Steps in a week', x = 'Day of Week', y='Total Steps') 
+```
+If we check the total daily steps by the day of week, we can seek patterns like which days the users tend to walk more, one could assume that during workdays, while commuting, the user will walk more. and by the majority of the users in this dataset this is true. Specially on Sundays, people tend to take fewer steps. 
+
+```{r}
+fitDaily_clean %>% ggplot(aes(factor(WeekDay, weekdays(min(SleepDay)+0:6)), Calories)) + geom_col() + facet_wrap(~Id) + theme(axis.text.x = element_text(angle=90)) + labs(title = 'Total Calories Burned in a Week', x = 'Day of Week', y='Calories')
+```
+Considering the calories, people with a consistent schedule of exercises and a steady diet will have a more consistent calorie burn during the week. Weekends also will have an impact, because we tend to rest and burn less calories.
+
+```{r}
+fitDaily_clean$HoursAsleep <- fitDaily_clean$TotalMinutesAsleep/60
+fitDaily_clean %>% ggplot(aes(factor(WeekDay, weekdays(min(SleepDay)+0:6)), HoursAsleep)) + geom_col() + facet_wrap(~Id) + theme(axis.text.x = element_text(angle=90)) + labs(title = 'Sleep in a week', x = 'Day of Week', y='Total sleep in Hours')
+```
+The sleep cycle of peopel tend to be attached to many different variables, like [life style](https://www.tandfonline.com/doi/abs/10.3109/07420528.2013.813528), work, family and even pets. So it makes sense that there is no simplicit pattern. The interesting part is that the average of sleep during Sundays tends to be almost the same to everyone. And it wold make sense that the fact that we see less entries on weekends.
+
+```{r}
+fitDaily_clean %>% ggplot(aes(factor(WeekDay, weekdays(min(SleepDay)+0:6)), (TotalTimeInBed/60))) + geom_boxplot() + facet_wrap(~Id) + theme(axis.text.x = element_text(angle=90)) + labs(title = 'Total Minutes Expended in Bed', x = 'Day of Week', y='Time Expended in Bed')
+```
+At last, but not least, we can take a look at how much time people expend in bed, withou being assleep. Te mean value tends to be around 8 hours, which counts for awake time and sleep time. 
+
+### Conclusion
+
+In the beginning of this project we started with a few questions To answer:
+
+1. What are some trends in smart device usage?
+2. How could these trends apply to Bellabeat customers?
+3. How could these trends help influence Bellabeat marketing strategy?
+
+To answer those questions we analysed the provided data by FitBit users and using basic statistics and graphs. we found some difficulties due to the lack of information about gender and age of the participants. But we still can take very useful information with the data we have.
+
+So, by the data we have checked we can see that:
+1. The main usage of smart devices serves to track steps and activity, which imply that people have a strong interest to know if they are keeping a active life style. 
+2. These trends show that we can improve the Bellabeat apps and devices to better calculate calories expenditure and encourage more people to use the smart device during their sleep. Since the main goal of the company is to keep a track fora women of how their menstrual cycle is impacting their workout and sleep routine, with more data about sleep and calories tracking we can give the customer a more fitted plan to workout in an specific time of the day, improving the quality of the workout, and what foods have a bigger impact in the persons metabolism.
+3. We can use these info to show people that don't own any Bellabeat gadget that using theses divices will give a better life style and help to control stress, keep an active life and sleep better and not too much.
+
+
+
+
+
